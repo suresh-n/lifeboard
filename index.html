@@ -113,6 +113,63 @@
   .chip.active{background:var(--ink);color:#fff;border-color:var(--ink);}
   .chip.active .dot{filter:brightness(1.4);}
 
+  /* ---------- View tabs ---------- */
+  .viewnav{
+    padding:0 clamp(16px,4vw,40px) 14px;
+    display:flex;
+  }
+  .viewtabs{
+    display:inline-flex;background:var(--surface-soft);padding:4px;border-radius:11px;gap:2px;
+  }
+  .viewtab{
+    padding:8px 18px;border-radius:8px;border:none;background:transparent;
+    font-size:13.5px;font-weight:700;color:var(--ink-muted);
+  }
+  .viewtab.active{background:var(--surface);color:var(--ink);box-shadow:var(--shadow);}
+
+  /* ---------- Archive ---------- */
+  .archive{
+    display:none;
+    padding:0 clamp(16px,4vw,40px) 100px;
+  }
+  .archive.active{display:block;}
+  .archive-stats{
+    display:flex;gap:14px;margin-bottom:22px;flex-wrap:wrap;
+  }
+  .stat-card{
+    background:var(--surface);border-radius:14px;padding:14px 18px;box-shadow:var(--shadow);
+    min-width:120px;
+  }
+  .stat-card .num{font-family:'Space Grotesk',sans-serif;font-size:22px;font-weight:700;}
+  .stat-card .lbl{font-size:12px;color:var(--ink-muted);font-weight:600;}
+
+  .year-group{margin-bottom:16px;}
+  .year-head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:13px 16px;background:var(--surface-soft);border-radius:12px;
+    cursor:pointer;
+  }
+  .year-head h3{margin:0;font-size:16px;}
+  .year-head .yh-right{display:flex;align-items:center;gap:10px;color:var(--ink-muted);font-size:13px;font-weight:700;}
+  .year-head svg{width:16px;height:16px;transition:transform .15s ease;}
+  .year-group.collapsed .year-head svg{transform:rotate(-90deg);}
+  .year-body{padding:10px 4px 4px;display:flex;flex-direction:column;gap:8px;}
+  .year-group.collapsed .year-body{display:none;}
+
+  .arow{
+    background:var(--surface);border-radius:11px;padding:11px 14px;
+    display:flex;align-items:center;gap:12px;box-shadow:var(--shadow);
+  }
+  .arow:hover{cursor:pointer;}
+  .arow .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .arow .arow-title{flex:1;font-size:14px;font-weight:600;}
+  .arow .arow-meta{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+  .arow .arow-date{font-size:12px;color:var(--ink-muted);font-weight:600;white-space:nowrap;}
+
+  .archive-empty{
+    text-align:center;padding:60px 20px;color:var(--ink-muted);
+  }
+
   /* ---------- Mobile column tabs ---------- */
   .col-tabs{
     display:none;
@@ -152,8 +209,21 @@
     font-size:12px;font-weight:700;color:var(--ink-muted);
     background:var(--surface);padding:2px 9px;border-radius:999px;
   }
-  .column-drop{flex:1;display:flex;flex-direction:column;gap:10px;min-height:60px;}
+  .column-drop{
+    flex:1;display:flex;flex-direction:column;gap:10px;min-height:60px;
+    max-height:calc(100vh - 300px);overflow-y:auto;padding-right:4px;
+  }
   .column-drop.drag-over{background:rgba(255,255,255,.5);border-radius:12px;outline:2px dashed var(--line);}
+  .column-drop::-webkit-scrollbar{width:6px;}
+  .column-drop::-webkit-scrollbar-track{background:transparent;}
+  .column-drop::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px;}
+  .column-drop::-webkit-scrollbar-thumb:hover{background:var(--ink-muted);}
+
+  .show-more-btn{
+    flex-shrink:0;padding:10px;border-radius:10px;border:1.5px dashed var(--line);
+    background:transparent;color:var(--ink-muted);font-size:12.5px;font-weight:700;
+  }
+  .show-more-btn:hover{border-color:var(--ink);color:var(--ink);}
 
   .empty-col{
     flex:1;display:flex;align-items:center;justify-content:center;
@@ -330,6 +400,13 @@
   </div>
 </div>
 
+<div class="viewnav">
+  <div class="viewtabs">
+    <button class="viewtab active" data-view="board">Board</button>
+    <button class="viewtab" data-view="archive">Archive</button>
+  </div>
+</div>
+
 <div class="filterbar" id="filterBar"></div>
 
 <div class="col-tabs" id="colTabs">
@@ -360,6 +437,11 @@
     </div>
     <div class="column-drop" id="drop-done" data-status="done"></div>
   </div>
+</div>
+
+<div class="archive" id="archiveView">
+  <div class="archive-stats" id="archiveStats"></div>
+  <div id="archiveYears"></div>
 </div>
 
 <button class="fab" id="fabAdd" title="Add task">
@@ -452,6 +534,8 @@ let activeFilter = 'all';
 let activeMobileCol = 'todo';
 let editingId = null;
 let dragId = null;
+let currentView = 'board';
+const DONE_PREVIEW_SIZE = 8;
 
 function loadTasks(){
   try{ return JSON.parse(localStorage.getItem(STORE_KEY)) || seedFromNothing(); }
@@ -509,10 +593,25 @@ function renderBoard(){
     drop.innerHTML = '';
     if(items.length===0){
       drop.innerHTML = `<div class="empty-col">Nothing here yet</div>`;
+      return;
     }
-    items.sort((a,b)=>(a.order||0)-(b.order||0)).forEach(t=>{
-      drop.appendChild(renderCard(t));
-    });
+
+    if(status==='done'){
+      items.sort((a,b)=>(b.completedAt||b.updatedAt||0)-(a.completedAt||a.updatedAt||0));
+    } else {
+      items.sort((a,b)=>(a.order||0)-(b.order||0));
+    }
+
+    const shown = status==='done' ? items.slice(0, DONE_PREVIEW_SIZE) : items;
+    shown.forEach(t=> drop.appendChild(renderCard(t)));
+
+    if(status==='done' && items.length > DONE_PREVIEW_SIZE){
+      const btn = document.createElement('button');
+      btn.className = 'show-more-btn';
+      btn.textContent = `View all ${items.length} completed in Archive →`;
+      btn.addEventListener('click', ()=> setView('archive'));
+      drop.appendChild(btn);
+    }
   });
   const done = tasks.filter(t=>t.status==='done').length;
   const total = tasks.length;
@@ -596,6 +695,7 @@ function setStatus(id, status){
   const t = tasks.find(x=>x.id===id);
   if(!t) return;
   t.status = status; t.updatedAt = Date.now(); t.synced = false;
+  if(status==='done') t.completedAt = Date.now();
   saveTasks(); renderBoard();
   queueSync({action:'update', task:t});
 }
@@ -616,6 +716,98 @@ function renderMobileTabs(){
 document.querySelectorAll('.col-tab').forEach(tab=>{
   tab.addEventListener('click', ()=>{ activeMobileCol = tab.dataset.status; renderMobileTabs(); });
 });
+
+/* ---------------- View switching (Board / Archive) ---------------- */
+function setView(view){
+  currentView = view;
+  document.querySelectorAll('.viewtab').forEach(t=> t.classList.toggle('active', t.dataset.view===view));
+  document.getElementById('board').style.display = view==='board' ? 'grid' : 'none';
+  document.getElementById('colTabs').style.display = view==='board' ? '' : 'none';
+  document.getElementById('filterBar').style.display = view==='board' ? '' : 'none';
+  document.getElementById('archiveView').classList.toggle('active', view==='archive');
+  document.getElementById('fabAdd').style.display = view==='board' ? 'flex' : 'none';
+  if(view==='archive') renderArchive();
+}
+document.querySelectorAll('.viewtab').forEach(tab=>{
+  tab.addEventListener('click', ()=> setView(tab.dataset.view));
+});
+
+let expandedYears = null; // null = only most recent year expanded, set gets built on first render
+
+function renderArchive(){
+  const done = tasks.filter(t=>t.status==='done');
+  const container = document.getElementById('archiveYears');
+  const statsEl = document.getElementById('archiveStats');
+
+  if(done.length===0){
+    statsEl.innerHTML = '';
+    container.innerHTML = `<div class="archive-empty">Nothing completed yet — finished milestones will collect here, grouped by year.</div>`;
+    return;
+  }
+
+  const byYear = {};
+  done.forEach(t=>{
+    const ts = t.completedAt || t.updatedAt || t.createdAt || Date.now();
+    const y = new Date(ts).getFullYear();
+    (byYear[y] = byYear[y] || []).push(t);
+  });
+  const years = Object.keys(byYear).map(Number).sort((a,b)=>b-a);
+
+  if(expandedYears===null){ expandedYears = new Set([years[0]]); }
+
+  const thisYear = new Date().getFullYear();
+  const thisMonthCount = done.filter(t=>{
+    const d = new Date(t.completedAt || t.updatedAt || 0);
+    const now = new Date();
+    return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+  }).length;
+
+  statsEl.innerHTML = `
+    <div class="stat-card"><div class="num">${done.length}</div><div class="lbl">Total completed</div></div>
+    <div class="stat-card"><div class="num">${byYear[thisYear] ? byYear[thisYear].length : 0}</div><div class="lbl">This year</div></div>
+    <div class="stat-card"><div class="num">${thisMonthCount}</div><div class="lbl">This month</div></div>
+  `;
+
+  container.innerHTML = '';
+  years.forEach(y=>{
+    const items = byYear[y].sort((a,b)=>(b.completedAt||b.updatedAt||0)-(a.completedAt||a.updatedAt||0));
+    const group = document.createElement('div');
+    group.className = 'year-group' + (expandedYears.has(y) ? '' : ' collapsed');
+    group.innerHTML = `
+      <div class="year-head">
+        <h3>${y}</h3>
+        <div class="yh-right">
+          ${items.length} completed
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+      </div>
+      <div class="year-body"></div>
+    `;
+    const body = group.querySelector('.year-body');
+    items.forEach(t=>{
+      const cat = catInfo(t.category);
+      const pri = priInfo(t.priority);
+      const d = new Date(t.completedAt || t.updatedAt || t.createdAt);
+      const row = document.createElement('div');
+      row.className = 'arow';
+      row.innerHTML = `
+        <span class="dot" style="background:${getComputedColor(cat.color)}"></span>
+        <span class="arow-title">${escapeHtml(t.title)}</span>
+        <span class="arow-meta">
+          <span class="tag" style="background:${getComputedColor(pri.color)}22;color:${getComputedColor(pri.color)}">${pri.label}</span>
+          <span class="arow-date">${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span>
+        </span>
+      `;
+      row.addEventListener('click', ()=> openDrawer(t.id));
+      body.appendChild(row);
+    });
+    group.querySelector('.year-head').addEventListener('click', ()=>{
+      if(expandedYears.has(y)) expandedYears.delete(y); else expandedYears.add(y);
+      renderArchive();
+    });
+    container.appendChild(group);
+  });
+}
 
 /* ---------------- Drawer (add/edit) ---------------- */
 const drawer = document.getElementById('drawer');

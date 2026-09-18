@@ -323,8 +323,9 @@
       <div class="ring" id="progressRing"></div>
       <div class="ring-label"><b id="progressCount">0 / 0</b>reached</div>
     </div>
-    <button class="icon-btn" id="settingsBtn" title="Sync settings">
+    <button class="icon-btn" id="settingsBtn" title="Sync settings" style="position:relative;">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span id="syncBadge" style="display:none;position:absolute;top:-3px;right:-3px;width:10px;height:10px;border-radius:50%;background:var(--pri-high);border:2px solid var(--surface);"></span>
     </button>
   </div>
 </div>
@@ -534,8 +535,8 @@ function renderCard(t){
   el.innerHTML = `
     <div class="card-top">
       <div class="card-title">${escapeHtml(t.title)}</div>
-      <button class="card-menu-btn" data-edit="${t.id}">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v.01M12 12v.01M12 19v.01"/></svg>
+      <button class="card-menu-btn" data-edit="${t.id}" title="Edit">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
       </button>
     </div>
     ${t.notes ? `<div class="card-notes">${escapeHtml(t.notes)}</div>` : ''}
@@ -543,6 +544,7 @@ function renderCard(t){
       <span class="tag tag-cat"><span class="dot" style="background:${getComputedColor(cat.color)}"></span>${cat.label}</span>
       <span class="tag" style="background:${getComputedColor(pri.color)}22;color:${getComputedColor(pri.color)}">${pri.label}</span>
       ${due ? `<span class="tag tag-due ${due.overdue && t.status!=='done' ? 'overdue':''}">${due.overdue && t.status!=='done' ? 'Overdue · ' : ''}${due.label}</span>` : ''}
+      ${cfg.url && !t.synced ? `<span class="tag" style="background:#FFF3D6;color:#8A6300;">Not synced</span>` : ''}
     </div>
     <div class="card-move">
       <button class="move-btn" data-move="back" data-id="${t.id}" ${idx===0?'disabled':''}>&larr; Back</button>
@@ -552,7 +554,11 @@ function renderCard(t){
 
   el.addEventListener('dragstart', ()=>{ dragId=t.id; el.classList.add('dragging'); });
   el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); });
-  el.querySelector('[data-edit]').addEventListener('click', ()=>openDrawer(t.id));
+  el.querySelector('[data-edit]').addEventListener('click', (ev)=>{ ev.stopPropagation(); openDrawer(t.id); });
+  el.addEventListener('click', (ev)=>{
+    if(ev.target.closest('[data-move]')) return;
+    openDrawer(t.id);
+  });
   el.querySelectorAll('[data-move]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const dir = btn.dataset.move;
@@ -589,7 +595,7 @@ STATUSES.forEach(status=>{
 function setStatus(id, status){
   const t = tasks.find(x=>x.id===id);
   if(!t) return;
-  t.status = status; t.updatedAt = Date.now();
+  t.status = status; t.updatedAt = Date.now(); t.synced = false;
   saveTasks(); renderBoard();
   queueSync({action:'update', task:t});
 }
@@ -662,14 +668,14 @@ document.getElementById('saveBtn').addEventListener('click', ()=>{
 
   if(editingId){
     const t = tasks.find(x=>x.id===editingId);
-    Object.assign(t, {title, category:selectedCat, priority:selectedPri, dueDate:due, notes, updatedAt:Date.now()});
+    Object.assign(t, {title, category:selectedCat, priority:selectedPri, dueDate:due, notes, updatedAt:Date.now(), synced:false});
     queueSync({action:'update', task:t});
     showToast('Milestone updated');
   } else {
     const t = {
       id: uid(), title, category:selectedCat, priority:selectedPri,
       status:'todo', dueDate:due, notes, order: Date.now(),
-      createdAt: Date.now(), updatedAt: Date.now()
+      createdAt: Date.now(), updatedAt: Date.now(), synced:false
     };
     tasks.push(t);
     queueSync({action:'create', task:t});
@@ -771,23 +777,35 @@ function queueSync(item){
 let syncing = false;
 async function runSync(manual){
   if(syncing) return;
-  if(!cfg.url){ if(manual) updateSyncStatus('Add a Web App URL in settings'); return; }
+  if(!cfg.url){ if(manual) updateSyncStatus('Add a Web App URL in settings'); updateSyncBadge(); return; }
   syncing = true;
   try{
     let q = loadQueue();
     while(q.length){
       const item = q[0];
       await postAction(item);
+      if(item.action !== 'delete'){
+        const t = tasks.find(x=>x.id===item.task.id);
+        if(t){ t.synced = true; }
+      }
       q.shift();
       saveQueue(q);
     }
+    saveTasks(); renderBoard();
     cfg.lastSync = Date.now(); saveCfg();
     if(manual){ updateSyncStatus(); showToast('Synced'); }
   }catch(e){
     if(manual) updateSyncStatus('Sync failed — will retry automatically');
   } finally {
     syncing = false;
+    updateSyncBadge();
   }
+}
+
+function updateSyncBadge(){
+  const badge = document.getElementById('syncBadge');
+  const pending = loadQueue().length > 0;
+  badge.style.display = (cfg.url && pending) ? 'block' : 'none';
 }
 
 /* ---------------- Init ---------------- */
@@ -796,6 +814,7 @@ renderPickers();
 renderBoard();
 renderMobileTabs();
 updateSyncStatus();
+updateSyncBadge();
 if(cfg.url) runSync(false);
 window.addEventListener('online', ()=>runSync(false));
 </script>
